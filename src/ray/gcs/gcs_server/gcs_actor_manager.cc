@@ -102,6 +102,8 @@ GcsActorManager::GcsActorManager(
     std::shared_ptr<gcs::GcsPubSub> gcs_pub_sub, RuntimeEnvManager &runtime_env_manager,
     std::function<void(const ActorID &)> destroy_owned_placement_group_if_needed,
     std::function<std::string(const JobID &)> get_ray_namespace,
+    std::function<void(std::function<void(void)>, boost::posix_time::milliseconds)>
+        run_delayed,
     const rpc::ClientFactoryFn &worker_client_factory)
     : gcs_actor_scheduler_(std::move(scheduler)),
       gcs_table_storage_(std::move(gcs_table_storage)),
@@ -109,7 +111,9 @@ GcsActorManager::GcsActorManager(
       worker_client_factory_(worker_client_factory),
       destroy_owned_placement_group_if_needed_(destroy_owned_placement_group_if_needed),
       get_ray_namespace_(get_ray_namespace),
-      runtime_env_manager_(runtime_env_manager) {
+      runtime_env_manager_(runtime_env_manager),
+      run_delayed_(run_delayed),
+      actor_gc_delay_(RayConfig::instance().gcs_actor_table_min_duration_ms()) {
   RAY_CHECK(worker_client_factory_);
   RAY_CHECK(destroy_owned_placement_group_if_needed_);
 }
@@ -190,16 +194,35 @@ void GcsActorManager::HandleGetAllActorInfo(const rpc::GetAllActorInfoRequest &r
                                             rpc::GetAllActorInfoReply *reply,
                                             rpc::SendReplyCallback send_reply_callback) {
   RAY_LOG(DEBUG) << "Getting all actor info.";
-
-  for (const auto &iter : registered_actors_) {
-    reply->add_actor_table_data()->CopyFrom(iter.second->GetActorTableData());
-  }
-  for (const auto &iter : destroyed_actors_) {
-    reply->add_actor_table_data()->CopyFrom(iter.second->GetActorTableData());
-  }
-  RAY_LOG(DEBUG) << "Finished getting all actor info.";
-  GCS_RPC_SEND_REPLY(send_reply_callback, reply, Status::OK());
   ++counts_[CountType::GET_ALL_ACTOR_INFO_REQUEST];
+  if (request.show_dead_jobs() == false) {
+    for (const auto &iter : registered_actors_) {
+      reply->add_actor_table_data()->CopyFrom(iter.second->GetActorTableData());
+    }
+    for (const auto &iter : destroyed_actors_) {
+      reply->add_actor_table_data()->CopyFrom(iter.second->GetActorTableData());
+    }
+    RAY_LOG(DEBUG) << "Finished getting all actor info.";
+    GCS_RPC_SEND_REPLY(send_reply_callback, reply, Status::OK());
+    return;
+  }
+
+  RAY_CHECK(request.show_dead_jobs());
+  // We don't maintain an in-memory cache of all actors which belong to dead
+  // jobs, so fetch it from redis.
+  Status status = gcs_table_storage_->ActorTable().GetAll(
+      [reply, send_reply_callback](
+          const std::unordered_map<ActorID, rpc::ActorTableData> &result) {
+        for (const auto &pair : result) {
+          reply->add_actor_table_data()->CopyFrom(pair.second);
+        }
+        GCS_RPC_SEND_REPLY(send_reply_callback, reply, Status::OK());
+        RAY_LOG(DEBUG) << "Finished getting all actor info.";
+      });
+  if (!status.ok()) {
+    // Send the response to unblock the sender and free the request.
+    GCS_RPC_SEND_REPLY(send_reply_callback, reply, status);
+  }
 }
 
 void GcsActorManager::HandleGetNamedActorInfo(
@@ -554,6 +577,10 @@ void GcsActorManager::DestroyActor(const ActorID &actor_id) {
   // entirely if the callers check directly whether the owner is still alive.
   auto mutable_actor_table_data = actor->GetMutableActorTableData();
   mutable_actor_table_data->set_state(rpc::ActorTableData::DEAD);
+  auto time = current_sys_time_ms();
+  mutable_actor_table_data->set_end_time(time);
+  mutable_actor_table_data->set_timestamp(time);
+
   auto actor_table_data =
       std::make_shared<rpc::ActorTableData>(*mutable_actor_table_data);
   // The backend storage is reliable in the future, so the status must be ok.
@@ -786,7 +813,9 @@ void GcsActorManager::ReconstructActor(
       mutable_actor_table_data->set_allocated_creation_task_exception(
           new rpc::RayException(*creation_task_exception));
     }
-    mutable_actor_table_data->set_timestamp(current_sys_time_ms());
+    auto time = current_sys_time_ms();
+    mutable_actor_table_data->set_end_time(time);
+    mutable_actor_table_data->set_timestamp(time);
     // The backend storage is reliable in the future, so the status must be ok.
     RAY_CHECK_OK(gcs_table_storage_->ActorTable().Put(
         actor_id, *mutable_actor_table_data,
@@ -826,9 +855,13 @@ void GcsActorManager::OnActorCreationSuccess(const std::shared_ptr<GcsActor> &ac
   if (registered_actors_.count(actor_id) == 0) {
     return;
   }
+  auto mutable_actor_table_data = actor->GetMutableActorTableData();
+  auto time = current_sys_time_ms();
+  mutable_actor_table_data->set_timestamp(time);
+  if (actor->GetState() != rpc::ActorTableData::RESTARTING) {
+    mutable_actor_table_data->set_start_time(time);
+  }
   actor->UpdateState(rpc::ActorTableData::ALIVE);
-  auto actor_table_data = actor->GetActorTableData();
-  actor_table_data.set_timestamp(current_sys_time_ms());
 
   // We should register the entry to the in-memory index before flushing them to
   // GCS because otherwise, there could be timing problems due to asynchronous Put.
@@ -837,6 +870,8 @@ void GcsActorManager::OnActorCreationSuccess(const std::shared_ptr<GcsActor> &ac
   RAY_CHECK(!worker_id.IsNil());
   RAY_CHECK(!node_id.IsNil());
   RAY_CHECK(created_actors_[node_id].emplace(worker_id, actor_id).second);
+
+  auto actor_table_data = *mutable_actor_table_data;
   // The backend storage is reliable in the future, so the status must be ok.
   RAY_CHECK_OK(gcs_table_storage_->ActorTable().Put(
       actor_id, actor_table_data,
@@ -942,15 +977,19 @@ void GcsActorManager::OnJobFinished(const JobID &job_id) {
                   job_id](const std::unordered_map<ActorID, ActorTableData> &result) {
     if (!result.empty()) {
       std::vector<ActorID> non_detached_actors;
-      std::unordered_set<ActorID> non_detached_actors_set;
       for (auto &item : result) {
         if (!item.second.is_detached()) {
           non_detached_actors.push_back(item.first);
-          non_detached_actors_set.insert(item.first);
         }
       }
-      RAY_CHECK_OK(
-          gcs_table_storage_->ActorTable().BatchDelete(non_detached_actors, nullptr));
+
+      run_delayed_(
+          [this, non_detached_actors = std::move(non_detached_actors)]() {
+            RAY_CHECK_OK(gcs_table_storage_->ActorTable().BatchDelete(non_detached_actors,
+                                                                      nullptr));
+          },
+
+          actor_gc_delay_);
 
       for (auto iter = destroyed_actors_.begin(); iter != destroyed_actors_.end();) {
         if (iter->first.JobId() == job_id && !iter->second->IsDetached()) {
