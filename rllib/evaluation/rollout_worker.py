@@ -9,6 +9,9 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, \
     TYPE_CHECKING, Union
 
+import warnings
+warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
+
 import ray
 from ray.rllib.env.base_env import BaseEnv
 from ray.rllib.env.env_context import EnvContext
