@@ -28,7 +28,6 @@ class MultiCallbacks(DefaultCallbacks):
     ])
 
     """
-
     def __init__(self, callback_class_list):
         super().__init__()
         self._callback_class_list = callback_class_list
@@ -51,13 +50,12 @@ class MultiCallbacks(DefaultCallbacks):
                          env_index: Optional[int] = None,
                          **kwargs) -> None:
         for callback in self._callback_list:
-            callback.on_episode_start(
-                worker=worker,
-                base_env=base_env,
-                policies=policies,
-                episode=episode,
-                env_index=env_index,
-                **kwargs)
+            callback.on_episode_start(worker=worker,
+                                      base_env=base_env,
+                                      policies=policies,
+                                      episode=episode,
+                                      env_index=env_index,
+                                      **kwargs)
 
     def on_episode_step(self,
                         *,
@@ -67,12 +65,11 @@ class MultiCallbacks(DefaultCallbacks):
                         env_index: Optional[int] = None,
                         **kwargs) -> None:
         for callback in self._callback_list:
-            callback.on_episode_step(
-                worker=worker,
-                base_env=base_env,
-                episode=episode,
-                env_index=env_index,
-                **kwargs)
+            callback.on_episode_step(worker=worker,
+                                     base_env=base_env,
+                                     episode=episode,
+                                     env_index=env_index,
+                                     **kwargs)
 
     def on_episode_end(self,
                        *,
@@ -83,19 +80,20 @@ class MultiCallbacks(DefaultCallbacks):
                        env_index: Optional[int] = None,
                        **kwargs) -> None:
         for callback in self._callback_list:
-            callback.on_episode_end(
-                worker=worker,
-                base_env=base_env,
-                policies=policies,
-                episode=episode,
-                env_index=env_index,
-                **kwargs)
+            callback.on_episode_end(worker=worker,
+                                    base_env=base_env,
+                                    policies=policies,
+                                    episode=episode,
+                                    env_index=env_index,
+                                    **kwargs)
 
-    def on_postprocess_trajectory(
-            self, *, worker: "RolloutWorker", episode: MultiAgentEpisode,
-            agent_id: AgentID, policy_id: PolicyID,
-            policies: Dict[PolicyID, Policy], postprocessed_batch: SampleBatch,
-            original_batches: Dict[AgentID, SampleBatch], **kwargs) -> None:
+    def on_postprocess_trajectory(self, *, worker: "RolloutWorker",
+                                  episode: MultiAgentEpisode,
+                                  agent_id: AgentID, policy_id: PolicyID,
+                                  policies: Dict[PolicyID, Policy],
+                                  postprocessed_batch: SampleBatch,
+                                  original_batches: Dict[AgentID, SampleBatch],
+                                  **kwargs) -> None:
         for callback in self._callback_list:
             callback.on_postprocess_trajectory(
                 worker=worker,
@@ -115,11 +113,10 @@ class MultiCallbacks(DefaultCallbacks):
     def on_learn_on_batch(self, *, policy: Policy, train_batch: SampleBatch,
                           result: dict, **kwargs) -> None:
         for callback in self._callback_list:
-            callback.on_learn_on_batch(
-                policy=policy,
-                train_batch=train_batch,
-                result=result,
-                **kwargs)
+            callback.on_learn_on_batch(policy=policy,
+                                       train_batch=train_batch,
+                                       result=result,
+                                       **kwargs)
 
     def on_train_result(self, *, trainer, result: dict, **kwargs) -> None:
         for callback in self._callback_list:

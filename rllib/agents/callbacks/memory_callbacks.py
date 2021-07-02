@@ -36,7 +36,6 @@ class MemoryTrackingCallbacks(DefaultCallbacks):
     Add MemoryTrackingCallbacks callback to the tune config
     e.g. { ...'callbacks': MemoryTrackingCallbacks ...}
     """
-
     def __init__(self):
         super().__init__()
 

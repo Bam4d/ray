@@ -13,7 +13,8 @@ T = TypeVar("T")
 U = TypeVar("U")
 
 
-def from_items(items: List[T], num_shards: int = 2,
+def from_items(items: List[T],
+               num_shards: int = 2,
                repeat: bool = False) -> "ParallelIterator[T]":
     """Create a parallel iterator from an existing set of objects.
 
@@ -33,7 +34,8 @@ def from_items(items: List[T], num_shards: int = 2,
     return from_iterators(shards, repeat=repeat, name=name)
 
 
-def from_range(n: int, num_shards: int = 2,
+def from_range(n: int,
+               num_shards: int = 2,
                repeat: bool = False) -> "ParallelIterator[int]":
     """Create a parallel iterator over the range 0..n.
 
@@ -163,7 +165,6 @@ class ParallelIterator(Generic[T]):
         >>> print(next(it))
         ... [worker_1_result_2, worker_2_result_2]
     """
-
     def __init__(self, actor_sets: List["_ActorSet"], name: str,
                  parent_iterators: List["ParallelIterator[Any]"]):
         """Create a parallel iterator (this is an internal function)."""
@@ -193,8 +194,9 @@ class ParallelIterator(Generic[T]):
             name=self.name + name,
             parent_iterators=self.parent_iterators)
 
-    def transform(self, fn: Callable[[Iterable[T]], Iterable[U]]
-                  ) -> "ParallelIterator[U]":
+    def transform(
+            self, fn: Callable[[Iterable[T]],
+                               Iterable[U]]) -> "ParallelIterator[U]":
         """Remotely transform the iterator.
 
         This is advanced version of for_each that allows you to apply arbitrary
@@ -221,7 +223,9 @@ class ParallelIterator(Generic[T]):
         return self._with_transform(lambda local_it: local_it.transform(fn),
                                     ".transform()")
 
-    def for_each(self, fn: Callable[[T], U], max_concurrency=1,
+    def for_each(self,
+                 fn: Callable[[T], U],
+                 max_concurrency=1,
                  resources=None) -> "ParallelIterator[U]":
         """Remotely apply fn to each item in this iterator.
 
@@ -311,7 +315,8 @@ class ParallelIterator(Generic[T]):
         it.name = self.name + ".combine()"
         return it
 
-    def local_shuffle(self, shuffle_buffer_size: int,
+    def local_shuffle(self,
+                      shuffle_buffer_size: int,
                       seed: int = None) -> "ParallelIterator[T]":
         """Remotely shuffle items of each shard independently
 
@@ -346,7 +351,8 @@ class ParallelIterator(Generic[T]):
                 shuffle_buffer_size,
                 str(seed) if seed is not None else "None"))
 
-    def repartition(self, num_partitions: int,
+    def repartition(self,
+                    num_partitions: int,
                     batch_ms: int = 0) -> "ParallelIterator[T]":
         """Returns a new ParallelIterator instance with num_partitions shards.
 
@@ -386,22 +392,23 @@ class ParallelIterator(Generic[T]):
         def base_iterator(num_partitions, partition_index, timeout=None):
             futures = {}
             for a in all_actors:
-                futures[a.par_iter_slice_batch.remote(
-                    step=num_partitions,
-                    start=partition_index,
-                    batch_ms=batch_ms)] = a
+                futures[a.par_iter_slice_batch.remote(step=num_partitions,
+                                                      start=partition_index,
+                                                      batch_ms=batch_ms)] = a
             while futures:
                 pending = list(futures)
                 if timeout is None:
                     # First try to do a batch wait for efficiency.
-                    ready, _ = ray.wait(
-                        pending, num_returns=len(pending), timeout=0)
+                    ready, _ = ray.wait(pending,
+                                        num_returns=len(pending),
+                                        timeout=0)
                     # Fall back to a blocking wait.
                     if not ready:
                         ready, _ = ray.wait(pending, num_returns=1)
                 else:
-                    ready, _ = ray.wait(
-                        pending, num_returns=len(pending), timeout=timeout)
+                    ready, _ = ray.wait(pending,
+                                        num_returns=len(pending),
+                                        timeout=timeout)
                 for obj_ref in ready:
                     actor = futures.pop(obj_ref)
                     try:
@@ -427,8 +434,9 @@ class ParallelIterator(Generic[T]):
         worker_cls = ray.remote(ParallelIteratorWorker)
         actors = [worker_cls.remote(g, repeat=False) for g in generators]
         # need explicit reference to self so actors in this instance do not die
-        return ParallelIterator(
-            [_ActorSet(actors, [])], name, parent_iterators=[self])
+        return ParallelIterator([_ActorSet(actors, [])],
+                                name,
+                                parent_iterators=[self])
 
     def gather_sync(self) -> "LocalIterator[T]":
         """Returns a local iterable for synchronous iteration.
@@ -459,7 +467,6 @@ class ParallelIterator(Generic[T]):
             >>> next(it.batch_across_shards())
             ... [0, 0]
         """
-
         def base_iterator(timeout=None):
             active = []
             for actor_set in self.actor_sets:
@@ -536,14 +543,16 @@ class ParallelIterator(Generic[T]):
                 pending = list(futures)
                 if timeout is None:
                     # First try to do a batch wait for efficiency.
-                    ready, _ = ray.wait(
-                        pending, num_returns=len(pending), timeout=0)
+                    ready, _ = ray.wait(pending,
+                                        num_returns=len(pending),
+                                        timeout=0)
                     # Fall back to a blocking wait.
                     if not ready:
                         ready, _ = ray.wait(pending, num_returns=1)
                 else:
-                    ready, _ = ray.wait(
-                        pending, num_returns=len(pending), timeout=timeout)
+                    ready, _ = ray.wait(pending,
+                                        num_returns=len(pending),
+                                        timeout=timeout)
                 for obj_ref in ready:
                     actor = futures.pop(obj_ref)
                     try:
@@ -581,10 +590,10 @@ class ParallelIterator(Generic[T]):
         actor_sets.extend(other.actor_sets)
         # if one of these iterators is a result of a repartition, we need to
         # keep an explicit reference to its parent iterator
-        return ParallelIterator(
-            actor_sets,
-            f"ParallelUnion[{self}, {other}]",
-            parent_iterators=self.parent_iterators + other.parent_iterators)
+        return ParallelIterator(actor_sets,
+                                f"ParallelUnion[{self}, {other}]",
+                                parent_iterators=self.parent_iterators +
+                                other.parent_iterators)
 
     def select_shards(self,
                       shards_to_keep: List[int]) -> "ParallelIterator[T]":
@@ -761,21 +770,23 @@ class LocalIterator(Generic[T]):
     def __repr__(self):
         return f"LocalIterator[{self.name}]"
 
-    def transform(self, fn: Callable[[Iterable[T]], Iterable[U]]
-                  ) -> "LocalIterator[U]":
+    def transform(
+            self, fn: Callable[[Iterable[T]],
+                               Iterable[U]]) -> "LocalIterator[U]":
 
         # TODO(ekl) can we automatically handle NextValueNotReady here?
         def apply_transform(it):
             for item in fn(it):
                 yield item
 
-        return LocalIterator(
-            self.base_iterator,
-            self.shared_metrics,
-            self.local_transforms + [apply_transform],
-            name=self.name + ".transform()")
+        return LocalIterator(self.base_iterator,
+                             self.shared_metrics,
+                             self.local_transforms + [apply_transform],
+                             name=self.name + ".transform()")
 
-    def for_each(self, fn: Callable[[T], U], max_concurrency=1,
+    def for_each(self,
+                 fn: Callable[[T], U],
+                 max_concurrency=1,
                  resources=None) -> "LocalIterator[U]":
         if max_concurrency == 1:
 
@@ -832,11 +843,10 @@ class LocalIterator(Generic[T]):
 
             apply_foreach = add_wait_hooks
 
-        return LocalIterator(
-            self.base_iterator,
-            self.shared_metrics,
-            self.local_transforms + [apply_foreach],
-            name=self.name + ".for_each()")
+        return LocalIterator(self.base_iterator,
+                             self.shared_metrics,
+                             self.local_transforms + [apply_foreach],
+                             name=self.name + ".for_each()")
 
     def filter(self, fn: Callable[[T], bool]) -> "LocalIterator[T]":
         def apply_filter(it):
@@ -845,11 +855,10 @@ class LocalIterator(Generic[T]):
                     if isinstance(item, _NextValueNotReady) or fn(item):
                         yield item
 
-        return LocalIterator(
-            self.base_iterator,
-            self.shared_metrics,
-            self.local_transforms + [apply_filter],
-            name=self.name + ".filter()")
+        return LocalIterator(self.base_iterator,
+                             self.shared_metrics,
+                             self.local_transforms + [apply_filter],
+                             name=self.name + ".filter()")
 
     def batch(self, n: int) -> "LocalIterator[List[T]]":
         def apply_batch(it):
@@ -865,11 +874,10 @@ class LocalIterator(Generic[T]):
             if batch:
                 yield batch
 
-        return LocalIterator(
-            self.base_iterator,
-            self.shared_metrics,
-            self.local_transforms + [apply_batch],
-            name=self.name + f".batch({n})")
+        return LocalIterator(self.base_iterator,
+                             self.shared_metrics,
+                             self.local_transforms + [apply_batch],
+                             name=self.name + f".batch({n})")
 
     def flatten(self) -> "LocalIterator[T[0]]":
         def apply_flatten(it):
@@ -880,13 +888,13 @@ class LocalIterator(Generic[T]):
                     for subitem in item:
                         yield subitem
 
-        return LocalIterator(
-            self.base_iterator,
-            self.shared_metrics,
-            self.local_transforms + [apply_flatten],
-            name=self.name + ".flatten()")
+        return LocalIterator(self.base_iterator,
+                             self.shared_metrics,
+                             self.local_transforms + [apply_flatten],
+                             name=self.name + ".flatten()")
 
-    def shuffle(self, shuffle_buffer_size: int,
+    def shuffle(self,
+                shuffle_buffer_size: int,
                 seed: int = None) -> "LocalIterator[T]":
         """Shuffle items of this iterator
 
@@ -1008,10 +1016,9 @@ class LocalIterator(Generic[T]):
         iterators = []
         for i in range(n):
             iterators.append(
-                LocalIterator(
-                    make_next(i),
-                    self.shared_metrics, [],
-                    name=self.name + f".duplicate[{i}]"))
+                LocalIterator(make_next(i),
+                              self.shared_metrics, [],
+                              name=self.name + f".duplicate[{i}]"))
 
         return iterators
 
@@ -1056,11 +1063,10 @@ class LocalIterator(Generic[T]):
 
         for i, it in enumerate(parent_iters):
             active.append(
-                LocalIterator(
-                    it.base_iterator,
-                    shared_metrics,
-                    it.local_transforms,
-                    timeout=timeouts[i]))
+                LocalIterator(it.base_iterator,
+                              shared_metrics,
+                              it.local_transforms,
+                              timeout=timeouts[i]))
         active = list(zip(round_robin_weights, active))
 
         def build_union(timeout=None):
@@ -1095,7 +1101,6 @@ class ParallelIteratorWorker(object):
 
     Actors that are passed to iter.from_actors() must subclass this interface.
     """
-
     def __init__(self, item_generator: Any, repeat: bool):
         """Create an iterator worker.
 
@@ -1108,7 +1113,6 @@ class ParallelIteratorWorker(object):
                 but a lambda that returns it can be.
             repeat (bool): Whether to loop over the iterator forever.
         """
-
         def make_iterator():
             if callable(item_generator):
                 return item_generator()
@@ -1221,7 +1225,6 @@ class _NextValueNotReady(Exception):
 
     This is used internally to implement the union() of multiple blocking
     local generators."""
-
     def __init__(self):
         # many generators use the _NextValueNotReady in spin-locks which
         # do not yeild threads to waiting processing such as pytorch GPU
@@ -1232,10 +1235,9 @@ class _NextValueNotReady(Exception):
 
 class _ActorSet(object):
     """Helper class that represents a set of actors and transforms."""
-
-    def __init__(
-            self, actors: List["ray.actor.ActorHandle"],
-            transforms: List[Callable[["LocalIterator"], "LocalIterator"]]):
+    def __init__(self, actors: List["ray.actor.ActorHandle"],
+                 transforms: List[Callable[["LocalIterator"],
+                                           "LocalIterator"]]):
         self.actors = actors
         self.transforms = transforms
 
